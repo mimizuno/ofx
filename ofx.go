@@ -7,6 +7,8 @@ import (
 	"io"
 	"log"
 	"math/big"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -86,7 +88,7 @@ type Ofx struct {
 func (o Ofx) String() string {
 	var buf bytes.Buffer
 
-	buf.WriteString(fmt.Sprintf("Account Type: %s\nBank Code: %s\nBranch Code: %s\nAccount Number: %s\n", o.Type, o.BankCode, o.BranchCode, o.AccountNumber))
+	buf.WriteString(fmt.Sprintf("Account Type: %v\nBank Code: %s\nBranch Code: %s\nAccount Number: %s\n", o.Type, o.BankCode, o.BranchCode, o.AccountNumber))
 
 	for _, t := range o.Transactions {
 		buf.WriteString(fmt.Sprintf("%s\n", t))
@@ -169,16 +171,11 @@ func Parse(f io.Reader) (*Ofx, error) {
 				trans.ID = res
 
 			case transDatePosted:
-				if len(res) < 8 {
-					return nil, fmt.Errorf("Invalid date posted string: '%s'", res)
-				}
-				res = res[:8]
-				// YYYYMMDD
-				if t, err := time.Parse("20060102", res); err != nil {
+				var t time.Time
+				if t, err = parseDateTime(res); err != nil {
 					return nil, err
-				} else {
-					trans.PostedDate = t
 				}
+				trans.PostedDate = t
 
 			case transAmount:
 				if err := trans.Amount.ParseFromString(res); err != nil {
@@ -220,4 +217,42 @@ func Parse(f io.Reader) (*Ofx, error) {
 	}
 
 	return ofx, nil
+}
+
+func reFindStringSubmatchMap(re *regexp.Regexp, s string) map[string]string {
+	m := re.FindStringSubmatch(s)
+	result := make(map[string]string)
+	for i, name := range re.SubexpNames() {
+		if i != 0 && name != "" {
+			result[name] = m[i]
+		}
+	}
+	return result
+}
+
+func parseDateTime(res string) (t time.Time, err error) {
+	re := regexp.MustCompile(`(?P<datetime>[.0-9]+)(?:\[(?P<offset>.+):(?P<name>.+)\])?`)
+	m := reFindStringSubmatchMap(re, res)
+
+	loc := time.UTC
+	if m["offset"] != "" {
+		offset, _ := strconv.ParseInt(m["offset"], 10, 32)
+		loc = time.FixedZone(m["name"], int(offset))
+	}
+
+	pattern := []string{
+		"20060102150405.999",
+		"20060102150405",
+		"20060102",
+	}
+
+	for _, pat := range pattern {
+		t, err = time.Parse(pat, m["datetime"])
+		t = time.Date(t.Year(), t.Month(), t.Day(), t.Hour(), t.Minute(), t.Second(), t.Nanosecond(), loc)
+		if err == nil {
+			return
+		}
+	}
+	err = fmt.Errorf("Invalid date posted string: '%s'", res)
+	return
 }

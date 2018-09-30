@@ -5,6 +5,7 @@ import (
 	"io/ioutil"
 	"os"
 	"testing"
+	"time"
 )
 
 func verifyOfx(t *testing.T, _ofx *Ofx, acctNum string, routingID string) {
@@ -66,6 +67,31 @@ func BenchmarkOFXParse(b *testing.B) {
 		r := bytes.NewReader(bts)
 		if _, err := Parse(r); err != nil {
 			b.Errorf("Error while parsing: %v\n", err)
+		}
+	}
+}
+
+func TestParseDateTime(t *testing.T) {
+	pst := time.FixedZone("PST", -7)
+	cases := []struct {
+		format   string
+		expected time.Time
+	}{
+		{format: "20070329", expected: time.Date(2007, 3, 29, 0, 0, 0, 0, time.UTC)},
+		{format: "20070329131415", expected: time.Date(2007, 3, 29, 13, 14, 15, 0, time.UTC)},
+		{format: "20070329131415.123", expected: time.Date(2007, 3, 29, 13, 14, 15, 123*1000*1000, time.UTC)},
+		{format: "20070329[-8:PST]", expected: time.Date(2007, 3, 29, 0, 0, 0, 0, pst)},
+		{format: "20070329131415[-8:PST]", expected: time.Date(2007, 3, 29, 13, 14, 15, 0, pst)},
+		{format: "20070329131415.123[-8:PST]", expected: time.Date(2007, 3, 29, 13, 14, 15, 123*1000*1000, pst)},
+	}
+
+	for _, c := range cases {
+		actual, err := parseDateTime(c.format)
+		if err != nil {
+			t.Errorf("Error occured: %v by %v", err, c.format)
+		}
+		if actual.Format(time.RFC3339) != c.expected.Format(time.RFC3339) {
+			t.Errorf("expected: %v, actual: %v, diff:%v", c.expected, actual, c.expected.Sub(actual))
 		}
 	}
 }
